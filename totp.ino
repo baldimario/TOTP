@@ -50,23 +50,29 @@ const char index_html[] PROGMEM = R"rawliteral(
   </head><body>
   <h3>TOTP</h3>
   <br><br>
+
   <form action="/setRTC">
-    <input id="timestamp" type="text" name="timestamp" value="">
-    <input type="submit" value="Set Timestamp">
+    <input id="timestamp" type="hidden" name="timestamp" value="">
+    <input type="submit" value="Set RTC">
+  </form>
+  
+  <form action="/resetSecrets">
+    <input type="submit" value="Reset Credentials">
   </form>
   
   <form action="/setSecrets">
     <textarea type="text" name="data">
-    {{jsonData}}
+{{jsonData}}
     </textarea>
     <input type="submit" value="Set Credentials">
   </form>
+  
   <script>
     function setTimestamp() {
       document.getElementById('timestamp').value = Math.floor(new Date().getTime()/1000);
     }
 
-    setInterval(setTimestamp, 1000);
+    setInterval(setTimestamp, 250);
     setTimestamp();
   </script>
 </body></html>)rawliteral";
@@ -113,6 +119,14 @@ void setupServer(){
   server.on("/getSecrets", HTTP_GET, [] (AsyncWebServerRequest *request) {
     String jsonData = preferences.getString("data", "{\"count\":0,\"list\":[]}");
     request->send(200, "text/html", jsonData);
+  });
+
+  
+  server.on("/resetSecrets", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    preferences.putString("data", String("{\"count\":0,\"list\":[]}"));
+    request->send(200, "text/html", "Ok");
+    delay(2000);
+    M5.Axp.PowerOff();
   });
   
   server.on("/setSecrets", HTTP_GET, [] (AsyncWebServerRequest *request) {
@@ -290,6 +304,8 @@ void loop() {
     }
     else {
       ui.infoCenter("No Config");
+      ui.clear();
+      ui.draw();
       delay(3000);
       beep();
       setupWiFi();
