@@ -6,14 +6,15 @@
  * Right button long press enter config mode creating a wifi with a captive portal to configure the device
  */
 #include <M5StickCPlus.h>
-#include "OTPManager.h"
-#include "WiFiManager.h"
+#include "CredentialManager.h"
+//#include "WiFiManager.h"
 #include "UI.h"
 #include "Input.h"
 #include "NTP.h"
 #include "AXP192.h"
 //#include "ConfigWebServer.h"
 #include <BleKeyboard.h>
+#include <Preferences.h>
 #define LED G10
 
 #include <WiFi.h>
@@ -21,6 +22,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 
+#include <ArduinoJson.h>
 
 DNSServer dnsServer;
 AsyncWebServer server(80);
@@ -30,25 +32,16 @@ BleKeyboard bleKeyboard;
 RTC_TimeTypeDef rtc_time;
 RTC_DateTypeDef rtc_date;
 
-OTP totps[] = {
-  OTP("VPN", "secret1"),
-  OTP("AWS", "secret2")
-};
-
-WiFiRecord wifiConnections[] = {
-  WiFiRecord("Vodafone-M4MM7F077", "pass1"),
-  WiFiRecord("FASTWEB-YDEB1J", "pass2")
-};
-
-WiFiManager wifiManager = WiFiManager(wifiConnections);
-OTPManager otpManager = OTPManager(totps);
+Credential credentials[100];
 UI ui;
 Input input;
 NTP ntp;
-String totpCode = String("");
+Preferences preferences;
+String secretCode = String("");
 unsigned long oldTimestamp = 0;
 unsigned long timer = 0;
 bool configModeEnabled = false;
+unsigned long n_credentials = 0;
 
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html><head>
@@ -57,9 +50,16 @@ const char index_html[] PROGMEM = R"rawliteral(
   </head><body>
   <h3>TOTP</h3>
   <br><br>
-  <form action="/get">
+  <form action="/setRTC">
     <input id="timestamp" type="text" name="timestamp" value="">
     <input type="submit" value="Set Timestamp">
+  </form>
+  
+  <form action="/setSecrets">
+    <textarea type="text" name="data">
+    {{jsonData}}
+    </textarea>
+    <input type="submit" value="Set Credentials">
   </form>
   <script>
     function setTimestamp() {
@@ -88,11 +88,14 @@ public:
 
 void setupServer(){
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-      request->send_P(200, "text/html", index_html); 
+      String jsonData = preferences.getString("data", "{\"count\":0,\"list\":[]}");
+      String renderedHTML = String(index_html);
+      renderedHTML.replace("{{jsonData}}", jsonData);
+      request->send_P(200, "text/html", renderedHTML.c_str()); 
       Serial.println("Client Connected");
   });
     
-  server.on("/get", HTTP_GET, [] (AsyncWebServerRequest *request) {
+  server.on("/setRTC", HTTP_GET, [] (AsyncWebServerRequest *request) {
       unsigned long timestamp;
       
       if (request->hasParam("timestamp")) {
@@ -100,11 +103,26 @@ void setupServer(){
         ntp.setRTC(timestamp);
       }
 
-      request->send(200, "text/html", "The RTC was successfully set <br><a href=\"/\">Return to Home Page</a>");
+      request->send(200, "text/html", "The Settings was successfully applied <br><a href=\"/\">Return to Home Page</a>");
       
       configModeEnabled = false;
-      delay(1000);
+      delay(2000);
       M5.Axp.PowerOff();
+  });
+
+  server.on("/getSecrets", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    String jsonData = preferences.getString("data", "{\"count\":0,\"list\":[]}");
+    request->send(200, "text/html", jsonData);
+  });
+  
+  server.on("/setSecrets", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    if (request->hasParam("data")) {        
+      preferences.putString("data", String(request->getParam("data")->value()).c_str());
+    }
+    
+    request->send(200, "text/html", "Ok");
+    delay(2000);
+    M5.Axp.PowerOff();
   });
 }
  
@@ -152,13 +170,35 @@ void setupWiFi() {
 
 void setup() {
   Serial.begin(115200);
+  
+  preferences.begin("storage", false);
+
+  String json = preferences.getString("data", "{\"list\":[]}");
+  Serial.println(json);
+  DynamicJsonDocument doc(4096);
+  deserializeJson(doc, json);
+  JsonObject root = doc.as<JsonObject>();
+
+  Serial.println(root["list"].size());
+
+  n_credentials = root["list"].size();
+  //Credential credentials[n_credentials]; //(Credential*) malloc(root["list"].size()*sizeof(Credential));
+
+  for(int i = 0; i < n_credentials; i++) {
+    Serial.println(root["list"][i]["name"].as<String>());
+    Serial.println(root["list"][i]["secret"].as<String>());
+    Serial.println(root["list"][i]["isOTP"].as<bool>());
+    credentials[i] = Credential(root["list"][i]["name"].as<String>(), root["list"][i]["secret"].as<String>(), root["list"][i]["isOTP"].as<bool>());
+  }
+  
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
   beep();
   M5.begin();
   M5.Axp.begin();
   M5.Axp.EnableCoulombcounter();
-  M5.Imu.Init();
+  //M5.Imu.Init();
+  bleKeyboard.begin();
   ui.init();
   //wifiManager.connect(1);
   ui.setTextSize(4);
@@ -166,12 +206,12 @@ void setup() {
   ui.setTextSize(2);  
   ui.draw();
 
-  delay(500);
-  
-  //webserver.init(dnsServer);
   beep();
+  delay(500);
+  //webserver.init(dnsServer);
   ui.clear();
-  bleKeyboard.begin();
+  beep();
+  delay(100);
 }
 
 void loop() {
@@ -193,47 +233,68 @@ void loop() {
   if (input.btnBisPressed(1000)) {
     beep();
     setupWiFi();
-    //webserver.start(server, caprivePortalHandler);
     configModeEnabled = true;
+    //webserver.start(server, caprivePortalHandler);
   }
 
   if(configModeEnabled) {
-    ui.infoCenter("Config");
+    ui.infoCenter("Config Mode");
     ui.draw();
     return;
   }
 
   if (input.btnAisPressed()) {
     beep();
-    bleKeyboard.print(totpCode + "\n");
+    bleKeyboard.print(secretCode + "\n");
     beep();
     delay(1000);
     M5.Axp.PowerOff();
   }
 
-  if (timestamp != oldTimestamp) {    
-    long idx = input.getValue() % 2;
-    totpCode = otpManager.getOTP(idx).getToken(timestamp);
+  if (timestamp != oldTimestamp) { 
+    if(n_credentials > 0) {
+      long idx = input.getValue() % n_credentials;
+      Credential credential = credentials[idx];
+      secretCode = credential.getSecret();
+      bool isOTP = credential.isOTP();
+      String name = credential.getName();
+      String displayCode = isOTP ? secretCode : "*****";
+  
+      ui.fillRect(0, 0, 240, 40, DARKCYAN);
+      ui.rect(0, 41, 240, 1, WHITE);
+  
+      ui.setTextSize(2);
+      ui.setColor(bleKeyboard.isConnected() ? GREEN : RED);
+      ui.info(bleKeyboard.isConnected() ? "Connected" : "!Connected", 1, 20);
+      
+      ui.setColor(isCharging() ? GREEN : RED);
+      ui.infoTopLeft(isCharging() ? String("Charging") : String((int)getBatteryLevel()) + "%");
 
-    ui.fillRect(0, 0, 240, 40, DARKCYAN);
-    ui.rect(0, 41, 240, 1, WHITE);
-    ui.setColor(bleKeyboard.isConnected() ? GREEN : RED);
-    ui.info(bleKeyboard.isConnected() ? "Connected" : "!Connected", 1, 20);
+  
+      ui.setColor(WHITE);
+      ui.setTextSize(3);
+      ui.infoCenter(isOTP ? name + ":" + displayCode : name, 12);
+      
+      ui.setTextSize(2);
+      ui.setColor(CYAN);
+      ui.printDate();
     
-    //Serial.println(ntp.getEpoch());
-    ui.setColor(isCharging() ? GREEN : RED);
-    ui.infoTopLeft(isCharging() ? String("Charging") : String((int)getBatteryLevel()) + "%");
-    ui.setColor(WHITE);
-    ui.setTextSize(3);
-    ui.infoCenter(otpManager.getOTP(idx).getName() + ":" + totpCode, 12);
-    ui.setTextSize(2);
-    
-    ui.setColor(CYAN);
-    ui.printDate();
-    
-    int progress = (((float)( (timestamp) % 30 ) / 30) ) * 100;
-    ui.setColor(WHITE);
-    ui.progress(progress);
+      if(isOTP) {
+        int progress = (((float)( (timestamp) % 30 ) / 30) ) * 100;
+        ui.setColor(WHITE);
+        ui.progress(progress);
+      }
+      else {
+        ui.footer("Hidden password");
+      }
+    }
+    else {
+      ui.infoCenter("No Config");
+      delay(3000);
+      beep();
+      setupWiFi();
+      configModeEnabled = true;
+    }
     ui.draw();
     timer++;
   }

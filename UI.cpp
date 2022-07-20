@@ -111,8 +111,20 @@ void UI::progress(uint8_t progress) {
   uint8_t p = (int) ((float)this->_w*progress/100.0);
   
   this->fillRect(x, y-1, this->_w, h, DARKCYAN);
-  this->rect(x, y-2, this->_w, h+2, WHITE);
+  this->rect(x, y-2, this->_w-1, h+2, WHITE);
   this->fillRect(x, y-1, p, h, CYAN);
+}
+
+void UI::footer(String text) {
+  uint8_t x = 0;
+  uint8_t h = 20;
+  uint8_t y = this->_h-h;
+  
+  this->fillRect(x, y-1, this->_w, h, DARKCYAN);
+  this->rect(x, y-2, this->_w-1, h+2, WHITE);
+  this->setTextSize(2);
+  this->setColor(WHITE);
+  this->info(text, 3, y+2);
 }
 
 void UI::draw() {

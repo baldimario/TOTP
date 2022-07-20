@@ -25,6 +25,7 @@ typedef class UI {
     void fillRect(uint8_t, uint8_t, uint8_t, uint8_t, uint16_t);
     void progress(uint8_t);
     void turnOnDisplay();
+    void footer(String);
     void turnOffDisplay();
     void draw();
    private:
