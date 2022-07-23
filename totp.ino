@@ -12,7 +12,6 @@
 #include "Input.h"
 #include "NTP.h"
 #include "AXP192.h"
-//#include "ConfigWebServer.h"
 #include <BleKeyboard.h>
 #include <Preferences.h>
 #define LED G10
@@ -24,10 +23,12 @@
 
 #include <ArduinoJson.h>
 
+String name = "0x90";
+String manufacturer = "localghost";
 DNSServer dnsServer;
 AsyncWebServer server(80);
 
-BleKeyboard bleKeyboard;
+BleKeyboard bleKeyboard(name.c_str(), manufacturer.c_str(), 100);
 
 RTC_TimeTypeDef rtc_time;
 RTC_DateTypeDef rtc_date;
@@ -44,38 +45,91 @@ bool configModeEnabled = false;
 unsigned long n_credentials = 0;
 
 const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html><head>
-  <title>TOTP</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  </head><body>
-  <h3>TOTP</h3>
-  <br><br>
+<!DOCTYPE HTML>
+    <html>
+    <head>
+        <title>{{name}}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            * {
+                padding: 0px;
+                margin: 0px;
+            }
 
-  <form action="/setRTC">
-    <input id="timestamp" type="hidden" name="timestamp" value="">
-    <input type="submit" value="Set RTC">
-  </form>
-  
-  <form action="/resetSecrets">
-    <input type="submit" value="Reset Credentials">
-  </form>
-  
-  <form action="/setSecrets">
-    <textarea type="text" name="data">
+            body {
+                background-color: #111;
+                color: white;
+            }
+
+            .header {
+                background-color: #003e33;
+                height: 3em;
+                text-align: center;
+                padding-top: 1em;
+                border-bottom: 1px solid #006e62 
+            }
+
+            .json {
+                font-size: 1em;
+                padding: 2em;
+                width: 85%;
+                margin-top: 2em;
+                height: 45vh;
+            }
+
+            .container {
+                padding-left: 1em;
+                padding-right: 1em;
+            }
+
+            .button {
+                border-radius: 5px;
+                border: 1px solid #003e33;
+                background-color: #006856;
+                color: white;
+                padding: 2em;
+                font-size: 1em;
+                font-weight: bold;
+                text-transform: uppercase;
+                display: block;
+                width: 100%;
+                margin-top: 2em;
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="header">
+            <h1>{{name}}</h1>
+        </nav>
+
+        <div class="container">
+            <form action="/setRTC">
+                <input id="timestamp" type="hidden" name="timestamp" value="">
+                <input class="button" type="submit" value="Set RTC">
+            </form>
+
+            <form action="/resetSecrets">
+                <input class="button"  type="submit" value="Reset Credentials">
+            </form>
+
+            <form action="/setSecrets">
+                <textarea class="json" type="text" name="data">
 {{jsonData}}
-    </textarea>
-    <input type="submit" value="Set Credentials">
-  </form>
-  
-  <script>
-    function setTimestamp() {
-      document.getElementById('timestamp').value = Math.floor(new Date().getTime()/1000);
-    }
+                </textarea>
+                <input class="button"  type="submit" value="Set Credentials">
+            </form>
+        </div>
 
-    setInterval(setTimestamp, 250);
-    setTimestamp();
-  </script>
-</body></html>)rawliteral";
+        <script>
+            function setTimestamp() {
+                document.getElementById('timestamp').value = Math.floor(new Date().getTime()/1000);
+            }
+
+            setInterval(setTimestamp, 100);
+            setTimestamp();
+        </script>
+    </body>
+</html>)rawliteral";
 
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
@@ -88,7 +142,11 @@ public:
   }
 
   void handleRequest(AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", index_html); 
+    String jsonData = preferences.getString("data", "{\"count\":0,\"list\":[]}");
+    String renderedHTML = String(index_html);
+    renderedHTML.replace("{{jsonData}}", jsonData);
+    renderedHTML.replace("{{name}}", name);
+    request->send_P(200, "text/html", renderedHTML.c_str()); 
   }
 };
 
@@ -97,6 +155,7 @@ void setupServer(){
       String jsonData = preferences.getString("data", "{\"count\":0,\"list\":[]}");
       String renderedHTML = String(index_html);
       renderedHTML.replace("{{jsonData}}", jsonData);
+      renderedHTML.replace("{{name}}", name);
       request->send_P(200, "text/html", renderedHTML.c_str()); 
       Serial.println("Client Connected");
   });
@@ -105,7 +164,7 @@ void setupServer(){
       unsigned long timestamp;
       
       if (request->hasParam("timestamp")) {
-        timestamp =  atol(String(request->getParam("timestamp")->value()).c_str())+3;
+        timestamp =  atol(String(request->getParam("timestamp")->value()).c_str())+1;
         ntp.setRTC(timestamp);
       }
 
@@ -173,12 +232,12 @@ void beep() {
 
 void setupWiFi() {
   WiFi.mode(WIFI_AP); 
-  WiFi.softAP("TOTP");
+  WiFi.softAP(name.c_str());
   Serial.print("AP IP address: ");
   Serial.println(WiFi.softAPIP());
   setupServer();
   dnsServer.start(53, "*", WiFi.softAPIP());
-  server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);//only when requested from AP
+  server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER); //only when requested from AP
   server.begin();
 }
 
@@ -216,7 +275,7 @@ void setup() {
   ui.init();
   //wifiManager.connect(1);
   ui.setTextSize(4);
-  ui.infoCenter("TOTP");
+  ui.infoCenter(name);
   ui.setTextSize(2);  
   ui.draw();
 
@@ -226,14 +285,31 @@ void setup() {
   ui.clear();
   beep();
   delay(100);
+  M5.Imu.Init();
 }
 
+float theta = 0;
+float phi = 0;
+float last_theta = 0;
+float last_phi = 0;
+long counter = 0;
 void loop() {
   M5.update();
   ui.clear();
   dnsServer.processNextRequest();
   //webserver.update(dnsServer);
-
+  
+  float accX = 0;
+  float accY = 0;
+  float accZ = 0;
+  M5.Imu.getAccelData(&accX, &accY, &accZ);
+  if ((accX < 1) && (accX > -1)) {
+      theta = asin(-accX) * 57.295;
+  }
+  if (accZ != 0) {
+      phi = atan(accY / accZ) * 57.295;
+  }
+        
   unsigned long timestamp = ntp.getEpoch(); 
     
   digitalWrite(LED, !isCharging());
@@ -260,6 +336,9 @@ void loop() {
   if (input.btnAisPressed()) {
     beep();
     bleKeyboard.print(secretCode + "\n");
+    delay(500);
+    beep();
+    delay(100);
     beep();
     delay(1000);
     M5.Axp.PowerOff();
@@ -267,7 +346,18 @@ void loop() {
 
   if (timestamp != oldTimestamp) { 
     if(n_credentials > 0) {
-      long idx = input.getValue() % n_credentials;
+      if(last_phi > 10) {
+        counter++;
+        beep();
+        timer = 0;
+      }
+      if(last_phi < -10) {
+        counter--;
+        beep();
+        timer = 0;
+      }
+      //long idx = input.getValue() % n_credentials;
+      long idx = (counter+input.getValue()) % n_credentials;
       Credential credential = credentials[idx];
       secretCode = credential.getSecret();
       bool isOTP = credential.isOTP();
@@ -320,5 +410,7 @@ void loop() {
     M5.Axp.PowerOff();
   }
 
+  last_theta = theta;
+  last_phi   = phi;
   oldTimestamp = timestamp;
 }

@@ -9,6 +9,7 @@ void UI::init() {
   this->_tftSprite.createSprite(this->_w, this->_h);
   this->_tftSprite.setRotation(3);
   this->clear();
+  this->draw();
 }
 
 void UI::info(String text, uint8_t x, uint8_t y) {
