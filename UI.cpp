@@ -38,7 +38,7 @@ void UI::printDate(int timezone) {
 
   uint8_t offsetHours = (timezone + (isDST ? 1 : 0));
 
-  this->info(String(DateStruct.Date) + "/" + String(DateStruct.Month) + "/" + String(DateStruct.Year), this->_w-8*this->_size*7, 1);
+  this->info(String(DateStruct.Date) + "/" + String(DateStruct.Month) + "/" + String(DateStruct.Year), this->_w-9*this->_size*7, 1);
   this->info(String(timeStruct.Hours + offsetHours) + ":" + String(timeStruct.Minutes) + ":" + String(timeStruct.Seconds), this->_w-8*this->_size*7, 20);
 }
 

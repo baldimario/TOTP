@@ -29,7 +29,7 @@ DNSServer dnsServer;
 AsyncWebServer server(80);
 
 BleKeyboard bleKeyboard(name.c_str(), manufacturer.c_str(), 100);
-
+  
 RTC_TimeTypeDef rtc_time;
 RTC_DateTypeDef rtc_date;
 
@@ -184,6 +184,7 @@ void setupServer(){
   server.on("/resetSecrets", HTTP_GET, [] (AsyncWebServerRequest *request) {
     preferences.putString("data", String("{\"count\":0,\"list\":[]}"));
     request->send(200, "text/html", "Ok");
+    configModeEnabled = false;
     delay(2000);
     M5.Axp.PowerOff();
   });
@@ -194,6 +195,7 @@ void setupServer(){
     }
     
     request->send(200, "text/html", "Ok");
+    configModeEnabled = false;
     delay(2000);
     M5.Axp.PowerOff();
   });
@@ -346,7 +348,7 @@ void loop() {
 
   if (timestamp != oldTimestamp) { 
     if(n_credentials > 0) {
-      if(last_phi > 10) {
+      /*if(last_phi > 10) {
         counter++;
         beep();
         timer = 0;
@@ -355,7 +357,14 @@ void loop() {
         counter--;
         beep();
         timer = 0;
+      }*/
+
+      if (input.btnBisPressed()) {
+        input.updateValue();
+        beep();
+        timer = 0;
       }
+      
       //long idx = input.getValue() % n_credentials;
       long idx = (counter+input.getValue()) % n_credentials;
       Credential credential = credentials[idx];
@@ -405,11 +414,11 @@ void loop() {
     timer++;
   }
 
-  if(timer > 75) {
+  if(!isCharging() && timer > 75) {
     beep();
     M5.Axp.PowerOff();
   }
-
+  
   last_theta = theta;
   last_phi   = phi;
   oldTimestamp = timestamp;
